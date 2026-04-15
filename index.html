@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML Games - Karisma Collection</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: radial-gradient(ellipse at 50% 30%, #1a3a10, #0d1a0a 70%);
+            color: #f0e8d8; font-family: 'Segoe UI', sans-serif;
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+        }
+        .container { text-align: center; padding: 40px; }
+        h1 {
+            font-size: 36px; margin-bottom: 8px;
+            background: linear-gradient(135deg, #fff, #ff9f43);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .subtitle { color: #2ecc50; font-size: 14px; letter-spacing: 2px; margin-bottom: 40px; }
+        .games { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+        .game-card {
+            background: rgba(15, 30, 10, 0.92); border: 2px solid #2a5a1a;
+            border-radius: 20px; padding: 30px 40px; width: 280px;
+            text-decoration: none; color: #f0e8d8;
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            box-shadow: 0 0 15px rgba(0,0,0,0.3);
+        }
+        .game-card:hover {
+            transform: scale(1.05); border-color: #e8651a;
+            box-shadow: 0 0 30px rgba(232, 101, 26, 0.4);
+        }
+        .game-emoji { font-size: 48px; margin-bottom: 12px; }
+        .game-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+        .game-desc { font-size: 12px; color: #888; line-height: 1.5; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>HTML GAMES</h1>
+        <div class="subtitle">KARISMA COLLECTION</div>
+        <div class="games">
+            <a href="AnimalTower.html" class="game-card">
+                <div class="game-emoji">🏗️</div>
+                <div class="game-title">Animal Tower</div>
+                <div class="game-desc">Stack characters on the platform!<br>Physics-based stacking game.</div>
+            </a>
+            <a href="SuikaKarisma.html" class="game-card">
+                <div class="game-emoji">🍉</div>
+                <div class="game-title">Suika Karisma</div>
+                <div class="game-desc">Merge characters to grow bigger!<br>Suika-style puzzle game.</div>
+            </a>
+        </div>
+    </div>
+</body>
+</html>
