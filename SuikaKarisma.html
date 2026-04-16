@@ -1145,9 +1145,9 @@
         var PASS='karisma2024',gate=document.getElementById('pw-gate'),
             inp=document.getElementById('pw-input'),err=document.getElementById('pw-error'),
             btn=document.getElementById('pw-submit');
-        if(sessionStorage.getItem('at_auth')==='1'){gate.style.display='none';}
+        if(localStorage.getItem('at_auth')==='1'){gate.style.display='none';}
         function tryLogin(){
-            if(inp.value===PASS){sessionStorage.setItem('at_auth','1');gate.style.display='none';}
+            if(inp.value===PASS){localStorage.setItem('at_auth','1');gate.style.display='none';}
             else{err.textContent='Wrong password';inp.value='';inp.focus();}
         }
         btn.addEventListener('click',tryLogin);

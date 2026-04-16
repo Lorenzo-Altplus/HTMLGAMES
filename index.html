@@ -95,14 +95,14 @@
         var err = document.getElementById('pw-error');
         var btn = document.getElementById('pw-submit');
 
-        if (sessionStorage.getItem('at_auth') === '1') {
+        if (localStorage.getItem('at_auth') === '1') {
             gate.classList.add('hidden');
             content.style.display = '';
         }
 
         function tryLogin() {
             if (inp.value === PASS) {
-                sessionStorage.setItem('at_auth', '1');
+                localStorage.setItem('at_auth', '1');
                 gate.classList.add('hidden');
                 content.style.display = '';
             } else {
