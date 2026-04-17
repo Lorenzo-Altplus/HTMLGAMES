@@ -88,12 +88,14 @@
     }
 
     function loadScripts() {
+        // Babylon pinned to v5.57.1 — l'API Ragdoll con Cannon funziona fino alla 5.x.
+        // Dalla 6 in poi il Ragdoll richiede Physics V2 (Havok).
         const urls = [
-            'https://cdn.babylonjs.com/babylon.js',
-            'https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js',
+            'https://cdn.jsdelivr.net/npm/babylonjs@5.57.1/babylon.js',
+            'https://cdn.jsdelivr.net/npm/babylonjs-loaders@5.57.1/babylonjs.loaders.min.js',
             'https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js',
-            '_karisma_b64.js',
-            '_ragdoll_game.js'
+            '_karisma_b64.js?v=2',
+            '_ragdoll_game.js?v=2'
         ];
         (function next(i){
             if (i >= urls.length) return;
