@@ -249,9 +249,9 @@ function toggleDebug() {
   }
 }
 
-// Crea wireframe "non parentate" e ogni frame copia posizione/rotazione world
-// dai TransformNode interni del ragdoll. Così la size dei box non viene
-// schiacciata dalla scala della gerarchia (kchar * bone-local scaling ≈ 0.01).
+// Approccio: parent al TransformNode del body (così position+rotation seguono gratis)
+// + compensazione di scala (inversa della scala della gerarchia) per mantenere
+// la size che mi aspetto. Più robusto dell'observer manuale.
 function buildDebugWireframes() {
   if (!ragdoll) return;
   const transforms = ragdoll._transforms || [];
@@ -263,6 +263,7 @@ function buildDebugWireframes() {
     [0.6, 0.4, 1.0], [0.8, 0.5, 1.0],
     [1.0, 0.4, 0.9], [1.0, 0.6, 1.0],
   ];
+  console.log('[DEBUG] ragdoll._transforms:', transforms.length);
   for (let i = 0; i < transforms.length; i++) {
     const tn = transforms[i];
     if (!tn) continue;
@@ -278,8 +279,7 @@ function buildDebugWireframes() {
     mat.backFaceCulling = false;
     box.material = mat;
     box.isPickable = false;
-    // niente parent: posizione e rotazione verranno copiate da tn ogni frame.
-    box.rotationQuaternion = new BABYLON.Quaternion();
+    box.parent = tn;   // segue position+rotation automaticamente
     debugMeshes.push(box);
     debugSourceTNs.push(tn);
   }
@@ -293,10 +293,12 @@ function buildDebugWireframes() {
     debugMeshes.push(g);
   }
 
-  // observer: copia world position + rotation dai TN interni ai box ogni frame
+  // observer: compensa la scala del parent ogni frame così il box appare
+  // alla dimensione "pensata" nella config, indipendente dalla scala bone.
   const tmpPos = new BABYLON.Vector3();
   const tmpRot = new BABYLON.Quaternion();
   const tmpScale = new BABYLON.Vector3();
+  let frameCount = 0;
   debugObserver = scene.onBeforeRenderObservable.add(() => {
     for (let i = 0; i < debugSourceTNs.length; i++) {
       const tn = debugSourceTNs[i];
@@ -304,12 +306,26 @@ function buildDebugWireframes() {
       if (!tn || !box) continue;
       tn.computeWorldMatrix(true);
       tn.getWorldMatrix().decompose(tmpScale, tmpRot, tmpPos);
-      box.position.copyFrom(tmpPos);
-      box.rotationQuaternion.copyFrom(tmpRot);
+      // inverte la scala: box appare alla sua size originale
+      box.scaling.set(
+        tmpScale.x !== 0 ? 1 / tmpScale.x : 1,
+        tmpScale.y !== 0 ? 1 / tmpScale.y : 1,
+        tmpScale.z !== 0 ? 1 / tmpScale.z : 1
+      );
+    }
+    frameCount++;
+    if (frameCount === 1 || frameCount === 120) {
+      // log iniziale + dopo 2s
+      const tn = debugSourceTNs[0];
+      if (tn) {
+        tn.computeWorldMatrix(true);
+        tn.getWorldMatrix().decompose(tmpScale, tmpRot, tmpPos);
+        console.log(`[DEBUG frame ${frameCount}] tn[0] worldPos=${tmpPos.toString()} worldScale=${tmpScale.toString()}`);
+      }
     }
   });
 
-  console.log('Debug wireframes:', debugMeshes.length, '(di cui', debugSourceTNs.length, 'sincronizzati ai body)');
+  console.log('Debug wireframes:', debugMeshes.length, '(di cui', debugSourceTNs.length, 'parent-linked ai body)');
 }
 
 function applyImpulseAt(pt){
