@@ -8,7 +8,8 @@ const engine = new BABYLON.Engine(canvas, true, { alpha: true, preserveDrawingBu
 let scene, ragdoll, rootMesh, skeleton, kchar, idleAG, danceAG, ground;
 let state = null;
 let restTransforms = null;
-let physicsViewer = null;
+let debugMeshes = [];   // wireframe box per ogni body del ragdoll
+let savedCfg = null;    // config passata al ragdoll (serve al debug per leggere le size)
 
 const ASSET_DIR = 'karisma-assets/';
 
@@ -128,7 +129,12 @@ async function start(){
     ];
     const existing = new Set(skeleton.bones.map(b => b.name));
     const cfg = cfgFull.filter(c => c.bones.every(bn => existing.has(bn)));
+    savedCfg = cfg;
     ragdoll = new BABYLON.Ragdoll(skeleton, kchar, cfg);
+    // log per debug: ispeziona cosa è stato creato internamente
+    console.log('Ragdoll aggregates:', ragdoll._aggregates?.length,
+                'transforms:', ragdoll._transforms?.length,
+                'bones:', ragdoll._bones?.length);
 
     setState('idle');
 
@@ -223,8 +229,6 @@ function setState(s) {
     stopAllAnims(); snapToRestPose();
     scene.onBeforeRenderObservable.addOnce(() => {
       ragdoll.ragdoll();
-      // se il debug era attivo, aggiorna anche la viewer (i body ora sono dinamici)
-      if (physicsViewer) refreshPhysicsViewer();
     });
     dBtn.textContent = 'RESTART';
     rBtn.textContent = 'RESTART'; rBtn.classList.add('active');
@@ -233,24 +237,69 @@ function setState(s) {
 
 function toggleDebug() {
   const btn = document.getElementById('btn-debug');
-  if (physicsViewer) {
-    physicsViewer.dispose();
-    physicsViewer = null;
+  if (debugMeshes.length) {
+    debugMeshes.forEach(m => m.dispose());
+    debugMeshes = [];
     btn.classList.remove('active');
   } else {
-    physicsViewer = new BABYLON.PhysicsViewer(scene);
-    refreshPhysicsViewer();
+    debugMeshes = buildDebugWireframes();
     btn.classList.add('active');
   }
 }
 
-function refreshPhysicsViewer() {
-  if (!physicsViewer) return;
-  scene.meshes.forEach(m => {
-    if (m === ground) return;
-    if (m.physicsBody)    physicsViewer.showBody(m.physicsBody);
-    if (m.physicsImpostor) physicsViewer.showImpostor(m.physicsImpostor);
-  });
+// Crea wireframe colorate agganciate ai TransformNode interni del ragdoll.
+// Poiché i body physics sono "montati" su quei TransformNode, le wireframe
+// seguono automaticamente il movimento dei body (anche quando ragdoll parte).
+function buildDebugWireframes() {
+  const out = [];
+  if (!ragdoll) return out;
+  const transforms = ragdoll._transforms || [];
+  const cfgs = savedCfg || [];
+  const palette = [
+    [1.0, 0.3, 0.3],  // rosso - testa
+    [1.0, 0.6, 0.2],  // arancione - torace
+    [1.0, 0.9, 0.2],  // giallo - bacino
+    [0.2, 1.0, 0.4],  // verde - braccio L
+    [0.4, 1.0, 0.8],  // verde acqua - avambraccio L
+    [0.2, 0.7, 1.0],  // azzurro - braccio R
+    [0.4, 0.8, 1.0],  // azzurro chiaro - avambraccio R
+    [0.6, 0.4, 1.0],  // viola - coscia L
+    [0.8, 0.5, 1.0],  // viola chiaro - gamba L
+    [1.0, 0.4, 0.9],  // magenta - coscia R
+    [1.0, 0.6, 1.0],  // rosa - gamba R
+  ];
+  for (let i = 0; i < transforms.length; i++) {
+    const tn = transforms[i];
+    if (!tn) continue;
+    const c = cfgs[i] || {};
+    const size = c.size || 0.15;
+    const box = BABYLON.MeshBuilder.CreateBox('dbg_box_' + i, { size }, scene);
+    const mat = new BABYLON.StandardMaterial('dbg_mat_' + i, scene);
+    const col = palette[i % palette.length];
+    mat.emissiveColor = new BABYLON.Color3(col[0], col[1], col[2]);
+    mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    mat.disableLighting = true;
+    mat.wireframe = true;
+    mat.backFaceCulling = false;
+    box.material = mat;
+    box.parent = tn;
+    box.isPickable = false;
+    out.push(box);
+  }
+  // anche il pavimento come riferimento
+  if (ground) {
+    const g = BABYLON.MeshBuilder.CreateGround('dbg_ground', { width: 30, height: 30 }, scene);
+    const gm = new BABYLON.StandardMaterial('dbg_ground_mat', scene);
+    gm.emissiveColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+    gm.disableLighting = true;
+    gm.wireframe = true;
+    g.material = gm;
+    g.position.y = 0.001;
+    g.isPickable = false;
+    out.push(g);
+  }
+  console.log('Debug wireframes created:', out.length);
+  return out;
 }
 
 function applyImpulseAt(pt){
