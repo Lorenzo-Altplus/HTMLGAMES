@@ -112,17 +112,21 @@ async function start(){
     await loadMainModel();
     await loadDanceFromOtherGLB();
 
-    // orientamento + posizione
-    rootMesh.rotationQuaternion = null;
-    rootMesh.computeWorldMatrix(true);
+    // NON toccare il __root__ del glTF: il loader ci mette un rotationQuaternion per la
+    // conversione di handedness. Avvolgo invece tutto in un TransformNode wrapper e
+    // applico rotazione/scala/posizione a quello.
+    const kchar = new BABYLON.TransformNode('kchar', scene);
+    rootMesh.parent = kchar;
+
+    kchar.computeWorldMatrix(true);
     const bb0 = rootMesh.getHierarchyBoundingVectors(true);
     const h0 = bb0.max.y - bb0.min.y;
-    if (h0 > 0) rootMesh.scaling.scaleInPlace(1.5 / h0);
-    rootMesh.rotation.y = Math.PI - 0.25;
-    rootMesh.position.set(1.1, 0, 0);
-    rootMesh.computeWorldMatrix(true);
+    if (h0 > 0) kchar.scaling.setAll(1.5 / h0);
+    kchar.rotation.y = Math.PI - 0.25;          // fronte camera + 3/4
+    kchar.position.x = 1.1;                      // a destra
+    kchar.computeWorldMatrix(true);
     const bb1 = rootMesh.getHierarchyBoundingVectors(true);
-    rootMesh.position.y -= bb1.min.y;
+    kchar.position.y = -bb1.min.y;               // piedi a y=0
 
     // rest pose (T-pose): salva TRS di ogni TransformNode collegato a una bone,
     // PRIMA che parta qualsiasi animazione. È lo stato a cui torneremo prima del ragdoll.
@@ -154,7 +158,8 @@ async function start(){
     ];
     const existing = new Set(skeleton.bones.map(b => b.name));
     const cfg = cfgFull.filter(c => c.bones.every(bn => existing.has(bn)));
-    ragdoll = new BABYLON.Ragdoll(skeleton, rootMesh, cfg);
+    // passo il wrapper: è il semantico root ora (contiene rotazione/scala/pos)
+    ragdoll = new BABYLON.Ragdoll(skeleton, kchar, cfg);
 
     // stato iniziale: idle
     setState('idle');
