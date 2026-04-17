@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Karisma Ragdoll</title>
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#111;font-family:system-ui,sans-serif;color:#fff}
+  #c{width:100%;height:100%;display:block;touch-action:none;outline:none}
+  #hud{position:fixed;top:10px;left:10px;background:rgba(0,0,0,.55);padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.5;max-width:340px;backdrop-filter:blur(4px);z-index:5}
+  #hud b{color:#ffb84d}
+  #mode{color:#ffe066;font-weight:700}
+  button{background:#ff5a3c;color:#fff;border:0;padding:6px 12px;border-radius:6px;font-weight:600;cursor:pointer;margin-top:6px;margin-right:4px;font-size:12px}
+  button:hover{background:#ff7a5c}
+  #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;font-size:18px;background:rgba(0,0,0,.85);z-index:20}
+  #loading.hidden{display:none}
+  .err{color:#ff6060;margin-top:10px;font-size:13px;max-width:400px;text-align:center}
+
+  /* Password gate */
+  #pw-gate {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 50%, #a5d6a7 100%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 9999; gap: 16px;
+  }
+  #pw-gate.hidden { display: none; }
+  #pw-gate h2 { font-family: 'Black Ops One', cursive; font-size: 24px; color: #43a047; }
+  #pw-gate input {
+      font-family: 'Orbitron', sans-serif; font-size: 16px;
+      padding: 12px 20px; border: 2px solid #a5d6a7; border-radius: 12px;
+      background: #fff; color: #2d3a2e; text-align: center;
+      outline: none; width: 220px;
+  }
+  #pw-gate input:focus { border-color: #ff7043; }
+  #pw-gate .pw-error { color: #e53935; font-size: 12px; height: 16px; }
+  #pw-gate button {
+      font-family: 'Black Ops One', cursive; font-size: 18px; color: #fff;
+      background: linear-gradient(135deg, #ff7043, #e64a19);
+      border: none; border-radius: 12px; padding: 12px 40px; cursor: pointer;
+      margin-top: 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- Password Gate -->
+<div id="pw-gate">
+    <h2>KARISMA RAGDOLL</h2>
+    <input type="password" id="pw-input" placeholder="Password" autocomplete="off">
+    <div class="pw-error" id="pw-error"></div>
+    <button id="pw-submit">ENTER</button>
+</div>
+
+<div id="game-wrapper" style="display:none;width:100%;height:100%;">
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div><b>Karisma</b> — modo: <span id="mode">...</span></div>
+    <div>• Trascina col mouse per orbitare</div>
+    <div>• Click sul personaggio → afferra e lancia</div>
+    <button id="btn-dance">Balla</button>
+    <button id="btn-ragdoll">Ragdoll!</button>
+    <button id="btn-random">Random</button>
+  </div>
+  <div id="loading">
+    <div>Caricamento...</div>
+    <div class="err" id="err"></div>
+  </div>
+</div>
+
+<!-- Password gate logic -->
+<script>
+(function() {
+    const PASS = 'karisma2024';
+    const gate = document.getElementById('pw-gate');
+    const wrapper = document.getElementById('game-wrapper');
+    const inp = document.getElementById('pw-input');
+    const err = document.getElementById('pw-error');
+    const btn = document.getElementById('pw-submit');
+
+    let started = false;
+    function startGame() {
+        if (started) return;
+        started = true;
+        gate.classList.add('hidden');
+        wrapper.style.display = '';
+        // load game scripts dynamically so we only download when authorised
+        loadScripts();
+    }
+
+    function loadScripts() {
+        const urls = [
+            'https://cdn.babylonjs.com/babylon.js',
+            'https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js',
+            'https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js',
+            '_karisma_b64.js',
+            '_ragdoll_game.js'
+        ];
+        (function next(i){
+            if (i >= urls.length) return;
+            const s = document.createElement('script');
+            s.src = urls[i];
+            s.onload = () => next(i+1);
+            s.onerror = () => {
+                document.getElementById('err').textContent = 'Errore caricando: ' + urls[i];
+            };
+            document.body.appendChild(s);
+        })(0);
+    }
+
+    if (localStorage.getItem('at_auth') === '1') {
+        startGame();
+    } else {
+        inp.focus();
+    }
+
+    function tryLogin() {
+        if (inp.value === PASS) {
+            localStorage.setItem('at_auth', '1');
+            startGame();
+        } else {
+            err.textContent = 'Wrong password';
+            inp.value = '';
+            inp.focus();
+        }
+    }
+
+    btn.addEventListener('click', tryLogin);
+    inp.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') tryLogin();
+    });
+})();
+</script>
+
+</body>
+</html>
