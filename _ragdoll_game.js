@@ -7,20 +7,12 @@ let scene, ragdoll, rootMesh, skeleton, danceAG, ground;
 let state = null;           // 'dance' | 'stand' | 'ragdoll' — resta null finché setState non viene chiamato
 let restMatrices = null;
 
-function b64ToBlobUrl(b64, mime){
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
-  return URL.createObjectURL(new Blob([bytes], { type: mime }));
-}
+const GLB_URL = 'karisma-assets/KarismaDance.glb';
 
 async function start(){
   try {
-    if (!window.__KARISMA_B64) throw new Error('_karisma_b64.js non caricato.');
     if (typeof HavokPhysics !== 'function') throw new Error('HavokPhysics non caricato.');
     if (!BABYLON.Ragdoll) throw new Error('BABYLON.Ragdoll mancante.');
-
-    const glbUrl = b64ToBlobUrl(window.__KARISMA_B64, 'model/gltf-binary');
 
     scene = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0, 0, 0, 0); // trasparente: si vede il bg dietro
@@ -50,14 +42,16 @@ async function start(){
     new BABYLON.PhysicsAggregate(ground, BABYLON.PhysicsShapeType.BOX,
       { mass: 0, friction: 0.8, restitution: 0.1 }, scene);
 
-    // carica GLB
-    const res = await BABYLON.SceneLoader.ImportMeshAsync('', '', glbUrl, scene, null, '.glb');
+    // carica GLB direttamente dal file nel repo
+    const res = await BABYLON.SceneLoader.ImportMeshAsync('', GLB_URL.substring(0, GLB_URL.lastIndexOf('/')+1), GLB_URL.substring(GLB_URL.lastIndexOf('/')+1), scene);
     rootMesh = res.meshes[0];
     skeleton = res.skeletons[0];
-    URL.revokeObjectURL(glbUrl);
     if (!skeleton) throw new Error('Skeleton non trovato.');
 
-    // scala a 1.5m, ruota 180° + twist per far guardare verso la camera
+    // scala a 1.5m e ruota 180° per far guardare verso la camera.
+    // IMPORTANTE: glTF imposta rotationQuaternion che sovrascrive rotation.y,
+    // quindi va azzerato prima per usare gli Euler.
+    rootMesh.rotationQuaternion = null;
     rootMesh.computeWorldMatrix(true);
     const bb0 = rootMesh.getHierarchyBoundingVectors(true);
     const h0 = bb0.max.y - bb0.min.y;
