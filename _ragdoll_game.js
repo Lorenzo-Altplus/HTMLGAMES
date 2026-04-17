@@ -81,18 +81,26 @@ async function start(){
 
     await loadMainModel();
 
-    // wrapper per rotazione/scala/posizione senza toccare __root__ del glTF
-    kchar = new BABYLON.TransformNode('kchar', scene);
-    rootMesh.parent = kchar;
-    kchar.computeWorldMatrix(true);
+    // NIENTE wrapper: applico tutto direttamente al __root__ del glTF.
+    // Il wrapper faceva sì che Ragdoll creasse i body alle posizioni LOCALI delle bone
+    // (senza la trasformazione del wrapper) → mismatch tra character visibile e ragdoll.
+    // Per ruotare di 180° senza rompere la correzione di handedness del glTF loader,
+    // COMPONGO il quaternion esistente invece di azzerarlo.
+    rootMesh.computeWorldMatrix(true);
     const bb0 = rootMesh.getHierarchyBoundingVectors(true);
     const h0 = bb0.max.y - bb0.min.y;
-    if (h0 > 0) kchar.scaling.setAll(1.5 / h0);
-    kchar.rotation.y = Math.PI - 0.25;
-    kchar.position.x = 1.1;
-    kchar.computeWorldMatrix(true);
+    if (h0 > 0) rootMesh.scaling.scaleInPlace(1.5 / h0);
+
+    // pre-moltiplica con rotazione Y=π-0.25 (in world space)
+    if (!rootMesh.rotationQuaternion) rootMesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+    const flip = BABYLON.Quaternion.FromEulerAngles(0, Math.PI - 0.25, 0);
+    rootMesh.rotationQuaternion = flip.multiply(rootMesh.rotationQuaternion);
+
+    rootMesh.position.x = 1.1;
+    rootMesh.computeWorldMatrix(true);
     const bb1 = rootMesh.getHierarchyBoundingVectors(true);
-    kchar.position.y = -bb1.min.y;
+    rootMesh.position.y = -bb1.min.y;
+    kchar = rootMesh; // alias per il resto del codice che usava kchar
 
     // rest pose: snapshot dei TransformNode collegati alle bone
     restTransforms = skeleton.bones.map(b => {
@@ -124,7 +132,7 @@ async function start(){
     const existing = new Set(skeleton.bones.map(b => b.name));
     const cfg = cfgFull.filter(c => c.bones.every(bn => existing.has(bn)));
     savedCfg = cfg;
-    ragdoll = new BABYLON.Ragdoll(skeleton, kchar, cfg);
+    ragdoll = new BABYLON.Ragdoll(skeleton, rootMesh, cfg);
     // log per debug: ispeziona cosa è stato creato internamente
     console.log('Ragdoll aggregates:', ragdoll._aggregates?.length,
                 'transforms:', ragdoll._transforms?.length,
