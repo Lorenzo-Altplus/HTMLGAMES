@@ -1,4 +1,5 @@
 // Karisma Ragdoll — game logic (loaded after password gate)
+// Uses Babylon 6.48.1 + Havok (Physics V2).
 (function(){
 const canvas = document.getElementById('c');
 const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
@@ -15,32 +16,40 @@ function b64ToBlobUrl(b64, mime){
 async function start(){
   try {
     if (!window.__KARISMA_B64) throw new Error('_karisma_b64.js non caricato.');
+    if (typeof HavokPhysics !== 'function') throw new Error('HavokPhysics non caricato.');
+    if (!BABYLON.Ragdoll) throw new Error('BABYLON.Ragdoll mancante (serve Babylon 6+).');
+
     const glbUrl = b64ToBlobUrl(window.__KARISMA_B64, 'model/gltf-binary');
 
     scene = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0.08, 0.08, 0.12, 1);
 
+    // camera
     const cam = new BABYLON.ArcRotateCamera('cam', -Math.PI/2, Math.PI/2.15, 4.2, new BABYLON.Vector3(0, 1.0, 0), scene);
     cam.attachControl(canvas, true);
     cam.wheelPrecision = 40;
-    cam.lowerRadiusLimit = 1.5; cam.upperRadiusLimit = 10;
+    cam.lowerRadiusLimit = 1.5; cam.upperRadiusLimit = 12;
     cam.minZ = 0.05;
 
+    // luci
     new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0.2,1,0.1), scene).intensity = 0.85;
     const d = new BABYLON.DirectionalLight('d', new BABYLON.Vector3(-0.4,-1,-0.6), scene);
     d.intensity = 1.2; d.position = new BABYLON.Vector3(3,5,3);
 
-    if (!window.CANNON) throw new Error('Cannon.js non caricato.');
-    scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin(true, 10, window.CANNON));
+    // physics V2: Havok (richiesto dalla classe Ragdoll in Babylon 6+)
+    const havok = await HavokPhysics();
+    scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.HavokPlugin(true, havok));
 
+    // pavimento
     ground = BABYLON.MeshBuilder.CreateGround('g', { width: 30, height: 30 }, scene);
     const gm = new BABYLON.StandardMaterial('gm', scene);
     gm.diffuseColor = new BABYLON.Color3(0.18, 0.2, 0.25);
     gm.specularColor = new BABYLON.Color3(0,0,0);
     ground.material = gm;
-    ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.BoxImpostor,
-      { mass: 0, friction: 0.8, restitution: 0.1 }, scene);
+    // V2: PhysicsAggregate
+    new BABYLON.PhysicsAggregate(ground, BABYLON.PhysicsShapeType.BOX, { mass: 0, friction: 0.8, restitution: 0.1 }, scene);
 
+    // carica GLB
     const res = await BABYLON.SceneLoader.ImportMeshAsync('', '', glbUrl, scene, null, '.glb');
     rootMesh = res.meshes[0];
     skeleton = res.skeletons[0];
@@ -48,12 +57,16 @@ async function start(){
 
     if (!skeleton) throw new Error('Skeleton non trovato nel GLB.');
 
+    // auto-scala a ~1.8m
     rootMesh.computeWorldMatrix(true);
     const bb = rootMesh.getHierarchyBoundingVectors(true);
     const h = bb.max.y - bb.min.y;
     if (h > 0) rootMesh.scaling.scaleInPlace(1.8 / h);
     rootMesh.position.y = 1.05;
 
+    console.log('Bones:', skeleton.bones.map(b=>b.name));
+
+    // --- RAGDOLL CONFIG (Mixamo) ---
     const B = 'mixamorig:';
     const cfgFull = [
       { bones: [B+'Head'],         size: 0.14, boxOffset: -0.08, min: -45, max: 45, mass: 1 },
@@ -76,13 +89,17 @@ async function start(){
     ];
     const existing = new Set(skeleton.bones.map(b=>b.name));
     const cfg = cfgFull.filter(c => c.bones.every(bn => existing.has(bn)));
+    const missing = cfgFull.filter(c => !c.bones.every(bn => existing.has(bn)));
+    if (missing.length) console.warn('Bone config mancanti:', missing.map(m=>m.bones));
 
     ragdoll = new BABYLON.Ragdoll(skeleton, rootMesh, cfg);
     ragdoll.init();
 
+    // animazione
     danceAG = scene.animationGroups[0] || null;
     if (danceAG) { danceAG.stop(); danceAG.loopAnimation = true; }
 
+    // modo iniziale
     const hash = (location.hash||'').toLowerCase();
     let mode;
     if (hash === '#dance')   mode = 'dance';
@@ -90,6 +107,7 @@ async function start(){
     else mode = Math.random() < 0.5 ? 'dance' : 'ragdoll';
     setMode(mode);
 
+    // click → afferra & lancia
     scene.onPointerObservable.add((pi) => {
       if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
       if (pi.event.button !== 0) return;
@@ -99,14 +117,20 @@ async function start(){
       const pt = pick.pickedPoint;
       let closest = null, dist = Infinity;
       scene.meshes.forEach(mm => {
-        if (mm.physicsImpostor && mm !== ground) {
-          const d = BABYLON.Vector3.Distance(mm.getAbsolutePosition(), pt);
-          if (d < dist) { dist = d; closest = mm; }
-        }
+        if (mm === ground) return;
+        const hasPhys = mm.physicsBody || mm.physicsImpostor;
+        if (!hasPhys) return;
+        const d = BABYLON.Vector3.Distance(mm.getAbsolutePosition(), pt);
+        if (d < dist) { dist = d; closest = mm; }
       });
       if (!closest) return;
       const dir = new BABYLON.Vector3((Math.random()-0.5)*2, Math.random()*1.3+0.4, (Math.random()-0.5)*2).normalize();
-      closest.physicsImpostor.applyImpulse(dir.scale(10 + Math.random()*10), pt);
+      const impulse = dir.scale(10 + Math.random()*10);
+      if (closest.physicsBody && closest.physicsBody.applyImpulse) {
+        closest.physicsBody.applyImpulse(impulse, pt);
+      } else if (closest.physicsImpostor) {
+        closest.physicsImpostor.applyImpulse(impulse, pt);
+      }
     });
 
     document.getElementById('loading').classList.add('hidden');
