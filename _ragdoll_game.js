@@ -4,6 +4,7 @@
 const canvas = document.getElementById('c');
 const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
 let scene, ragdoll, rootMesh, skeleton, danceAG, currentMode, ground;
+let ragdollActive = false;
 
 function b64ToBlobUrl(b64, mime){
   const bin = atob(b64);
@@ -92,8 +93,8 @@ async function start(){
     const missing = cfgFull.filter(c => !c.bones.every(bn => existing.has(bn)));
     if (missing.length) console.warn('Bone config mancanti:', missing.map(m=>m.bones));
 
+    // In Babylon 6 il costruttore chiama _init() da solo.
     ragdoll = new BABYLON.Ragdoll(skeleton, rootMesh, cfg);
-    ragdoll.init();
 
     // animazione
     danceAG = scene.animationGroups[0] || null;
@@ -148,7 +149,7 @@ function setMode(m){
   if (m === 'dance' && danceAG) danceAG.start(true);
   else if (m === 'ragdoll') {
     if (danceAG) danceAG.stop();
-    if (ragdoll && !ragdoll.ragdollMode) ragdoll.ragdoll();
+    if (ragdoll && !ragdollActive) { ragdoll.ragdoll(); ragdollActive = true; }
   }
 }
 
