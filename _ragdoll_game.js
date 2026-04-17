@@ -24,39 +24,31 @@ async function loadMainModel() {
 
   const newAGs = scene.animationGroups.filter(ag => !agsBefore.has(ag));
 
-  // trova Dance e Idle per nome; fallback: Idle = AG più lungo oltre a Dance
+  // Prendi Idle e Dance ESCLUSIVAMENTE per nome: in questo GLB ci sono anche
+  // tracce mixamo originali (es. "Armature|mixamo.com|Layer0_Armature" 20s) che
+  // sono dance duplicate — non vogliamo scambiarle per idle.
   const byName = (n) => newAGs.find(ag => ag.name.toLowerCase() === n.toLowerCase());
+  idleAG  = byName('Idle');
   danceAG = byName('Dance');
-  idleAG = byName('Idle');
-  if (!idleAG || (idleAG.to - idleAG.from) < 0.1) {
-    // Idle potrebbe avere durata 0 se il layer NLA non è stato pushato: usa il più lungo non-dance
-    let best = null, bestLen = 0;
-    newAGs.forEach(ag => {
-      if (ag === danceAG) return;
-      const len = ag.to - ag.from;
-      if (len > bestLen && len > 1) { bestLen = len; best = ag; }
-    });
-    idleAG = best;
-  }
-  if (!danceAG) {
-    let best = null, bestLen = 0;
-    newAGs.forEach(ag => {
-      if (ag === idleAG) return;
-      const len = ag.to - ag.from;
-      if (len > bestLen) { bestLen = len; best = ag; }
-    });
-    danceAG = best;
-  }
 
-  // dispose dei tracks extra (es. mixamo layer rimasto)
-  newAGs.forEach(ag => {
-    if (ag !== danceAG && ag !== idleAG) ag.dispose();
-  });
-  if (idleAG)  { idleAG.name = 'idle';   idleAG.loopAnimation = true;  idleAG.stop(); }
+  // dispose tutto ciò che non sia idle/dance
+  newAGs.forEach(ag => { if (ag !== idleAG && ag !== danceAG) ag.dispose(); });
+
+  // log diagnostico: fondamentale quando qualcosa non gira come aspettato
+  console.log('[AG] tutti disponibili (pre-dispose):',
+              newAGs.map(ag => `${ag.name}(${(ag.to-ag.from).toFixed(2)}s)`));
+  console.log('[AG] idle =', idleAG ? `"${idleAG.name}" dur=${(idleAG.to-idleAG.from).toFixed(2)}s` : 'NON TROVATA',
+              ' dance =', danceAG ? `"${danceAG.name}" dur=${(danceAG.to-danceAG.from).toFixed(2)}s` : 'NON TROVATA');
+
+  if (idleAG) {
+    idleAG.name = 'idle';
+    idleAG.loopAnimation = true;
+    idleAG.stop();
+    if (idleAG.to - idleAG.from < 0.1) {
+      console.warn('[AG] Idle ha durata ≈0 — nel GLB c\'è un solo keyframe, il personaggio resta fermo in quella posa. Per un vero loop serve pushare l\'action come NLA strip con più keyframe in Blender.');
+    }
+  }
   if (danceAG) { danceAG.name = 'dance'; danceAG.loopAnimation = true; danceAG.stop(); }
-
-  console.log('Loaded: idle =', idleAG ? `${(idleAG.to-idleAG.from).toFixed(1)}s` : 'n/a',
-              'dance =', danceAG ? `${(danceAG.to-danceAG.from).toFixed(1)}s` : 'n/a');
 }
 
 async function start(){
@@ -218,21 +210,27 @@ function setState(s) {
   const rBtn = document.getElementById('btn-ragdoll');
 
   if (s === 'idle') {
-    stopAllAnims(); if (idleAG) idleAG.start(true);
+    stopAllAnims();
+    if (idleAG) {
+      const dur = idleAG.to - idleAG.from;
+      if (dur > 0.1) idleAG.start(true);
+      else idleAG.start(false);    // 0 frame: basta partire una volta per applicare la posa
+    }
+    dBtn.style.display = '';
     dBtn.textContent = 'DANCE'; dBtn.classList.remove('active');
     rBtn.textContent = 'RAGDOLL'; rBtn.classList.remove('active');
   }
   else if (s === 'dance') {
-    stopAllAnims(); if (danceAG) danceAG.start(true); else if (idleAG) idleAG.start(true);
+    stopAllAnims(); if (danceAG) danceAG.start(true);
+    dBtn.style.display = '';
     dBtn.textContent = 'IDLE'; dBtn.classList.add('active');
     rBtn.textContent = 'RAGDOLL'; rBtn.classList.remove('active');
   }
   else if (s === 'ragdoll') {
     stopAllAnims(); snapToRestPose();
-    scene.onBeforeRenderObservable.addOnce(() => {
-      ragdoll.ragdoll();
-    });
-    dBtn.textContent = 'RESTART';
+    scene.onBeforeRenderObservable.addOnce(() => { ragdoll.ragdoll(); });
+    // in ragdoll c'è un solo bottone "restart"
+    dBtn.style.display = 'none';
     rBtn.textContent = 'RESTART'; rBtn.classList.add('active');
   }
 }
