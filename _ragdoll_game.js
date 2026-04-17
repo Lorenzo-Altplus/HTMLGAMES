@@ -4,7 +4,7 @@
 const canvas = document.getElementById('c');
 const engine = new BABYLON.Engine(canvas, true, { alpha: true, preserveDrawingBuffer: true, stencil: true });
 let scene, ragdoll, rootMesh, skeleton, danceAG, ground;
-let state = 'dance';        // 'dance' | 'stand' | 'ragdoll'
+let state = null;           // 'dance' | 'stand' | 'ragdoll' — resta null finché setState non viene chiamato
 let restMatrices = null;
 
 function b64ToBlobUrl(b64, mime){
@@ -25,14 +25,14 @@ async function start(){
     scene = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0, 0, 0, 0); // trasparente: si vede il bg dietro
 
-    // Camera frontale, personaggio posizionato a destra spostando il target
-    // (alpha=-PI/2 → fotocamera guarda lungo -Z; target.x negativo → char appare a destra)
-    const cam = new BABYLON.ArcRotateCamera('cam', -Math.PI/2, Math.PI/2.25, 3.8,
-      new BABYLON.Vector3(-0.9, 1.0, 0), scene);
+    // Camera statica: target al centro, personaggio spostato a destra nella scena
+    // così appare nella metà destra dello schermo come da mockup.
+    const cam = new BABYLON.ArcRotateCamera('cam', -Math.PI/2, Math.PI/2.05, 3.5,
+      new BABYLON.Vector3(0, 0.95, 0), scene);
     cam.attachControl(canvas, true);
-    cam.wheelPrecision = 40;
-    cam.lowerRadiusLimit = 2; cam.upperRadiusLimit = 8;
-    cam.lowerBetaLimit = Math.PI/4; cam.upperBetaLimit = Math.PI/2 + 0.2;
+    cam.wheelPrecision = 60;
+    cam.lowerRadiusLimit = 2; cam.upperRadiusLimit = 7;
+    cam.lowerBetaLimit = Math.PI/3; cam.upperBetaLimit = Math.PI/2 + 0.15;
     cam.minZ = 0.05;
 
     // luci morbide (background quasi bianco → meno contrasto necessario)
@@ -57,13 +57,17 @@ async function start(){
     URL.revokeObjectURL(glbUrl);
     if (!skeleton) throw new Error('Skeleton non trovato.');
 
-    // scala automatica ~1.8 m
+    // scala a 1.5m, ruota 180° + twist per far guardare verso la camera
     rootMesh.computeWorldMatrix(true);
-    const bb = rootMesh.getHierarchyBoundingVectors(true);
-    const h = bb.max.y - bb.min.y;
-    if (h > 0) rootMesh.scaling.scaleInPlace(1.8 / h);
-    rootMesh.position.set(0, 1.02, 0); // leggermente sopra terra
-    rootMesh.rotation.y = -0.15; // piccolo twist per vivacità
+    const bb0 = rootMesh.getHierarchyBoundingVectors(true);
+    const h0 = bb0.max.y - bb0.min.y;
+    if (h0 > 0) rootMesh.scaling.scaleInPlace(1.5 / h0);
+    rootMesh.rotation.y = Math.PI - 0.25;     // fronte → camera, con piccolo 3/4
+    rootMesh.position.set(1.1, 0, 0);          // a destra della scena
+    // ricalcola bb dopo scale+rotazione → piedi a y=0
+    rootMesh.computeWorldMatrix(true);
+    const bb1 = rootMesh.getHierarchyBoundingVectors(true);
+    rootMesh.position.y -= bb1.min.y;          // alza di quanto serve per avere piedi a terra
 
     // config ragdoll (Mixamo) — tuned
     const B = 'mixamorig:';
@@ -135,7 +139,8 @@ function setState(s) {
 
   if (s === 'dance') {
     btn.textContent = 'STOP';
-    if (prev === 'stand' && danceAG) danceAG.start(true);
+    // dallo stato "stand" i bone sono in T-pose: l'animazione li riprende senza problemi
+    if (danceAG) danceAG.start(true);
   }
   else if (s === 'stand') {
     btn.textContent = 'DANCE';
