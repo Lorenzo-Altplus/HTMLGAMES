@@ -8,8 +8,10 @@ const engine = new BABYLON.Engine(canvas, true, { alpha: true, preserveDrawingBu
 let scene, ragdoll, rootMesh, skeleton, kchar, idleAG, danceAG, ground;
 let state = null;
 let restTransforms = null;
-let debugMeshes = [];   // wireframe box per ogni body del ragdoll
-let savedCfg = null;    // config passata al ragdoll (serve al debug per leggere le size)
+let debugMeshes = [];      // wireframe box per ogni body del ragdoll
+let debugSourceTNs = [];   // TransformNode interni dai quali copiamo position/rotation
+let debugObserver = null;  // observer che sincronizza world transform ogni frame
+let savedCfg = null;       // config passata al ragdoll (per le size)
 
 const ASSET_DIR = 'karisma-assets/';
 
@@ -237,36 +239,31 @@ function setState(s) {
 
 function toggleDebug() {
   const btn = document.getElementById('btn-debug');
-  if (debugMeshes.length) {
+  if (debugMeshes.length || debugObserver) {
+    if (debugObserver) { scene.onBeforeRenderObservable.remove(debugObserver); debugObserver = null; }
     debugMeshes.forEach(m => m.dispose());
     debugMeshes = [];
+    debugSourceTNs = [];
     btn.classList.remove('active');
   } else {
-    debugMeshes = buildDebugWireframes();
+    buildDebugWireframes();
     btn.classList.add('active');
   }
 }
 
-// Crea wireframe colorate agganciate ai TransformNode interni del ragdoll.
-// Poiché i body physics sono "montati" su quei TransformNode, le wireframe
-// seguono automaticamente il movimento dei body (anche quando ragdoll parte).
+// Crea wireframe "non parentate" e ogni frame copia posizione/rotazione world
+// dai TransformNode interni del ragdoll. Così la size dei box non viene
+// schiacciata dalla scala della gerarchia (kchar * bone-local scaling ≈ 0.01).
 function buildDebugWireframes() {
-  const out = [];
-  if (!ragdoll) return out;
+  if (!ragdoll) return;
   const transforms = ragdoll._transforms || [];
   const cfgs = savedCfg || [];
   const palette = [
-    [1.0, 0.3, 0.3],  // rosso - testa
-    [1.0, 0.6, 0.2],  // arancione - torace
-    [1.0, 0.9, 0.2],  // giallo - bacino
-    [0.2, 1.0, 0.4],  // verde - braccio L
-    [0.4, 1.0, 0.8],  // verde acqua - avambraccio L
-    [0.2, 0.7, 1.0],  // azzurro - braccio R
-    [0.4, 0.8, 1.0],  // azzurro chiaro - avambraccio R
-    [0.6, 0.4, 1.0],  // viola - coscia L
-    [0.8, 0.5, 1.0],  // viola chiaro - gamba L
-    [1.0, 0.4, 0.9],  // magenta - coscia R
-    [1.0, 0.6, 1.0],  // rosa - gamba R
+    [1.0, 0.3, 0.3], [1.0, 0.6, 0.2], [1.0, 0.9, 0.2],
+    [0.2, 1.0, 0.4], [0.4, 1.0, 0.8],
+    [0.2, 0.7, 1.0], [0.4, 0.8, 1.0],
+    [0.6, 0.4, 1.0], [0.8, 0.5, 1.0],
+    [1.0, 0.4, 0.9], [1.0, 0.6, 1.0],
   ];
   for (let i = 0; i < transforms.length; i++) {
     const tn = transforms[i];
@@ -282,24 +279,39 @@ function buildDebugWireframes() {
     mat.wireframe = true;
     mat.backFaceCulling = false;
     box.material = mat;
-    box.parent = tn;
     box.isPickable = false;
-    out.push(box);
+    // niente parent: posizione e rotazione verranno copiate da tn ogni frame.
+    box.rotationQuaternion = new BABYLON.Quaternion();
+    debugMeshes.push(box);
+    debugSourceTNs.push(tn);
   }
-  // anche il pavimento come riferimento
+  // ground reference
   if (ground) {
     const g = BABYLON.MeshBuilder.CreateGround('dbg_ground', { width: 30, height: 30 }, scene);
     const gm = new BABYLON.StandardMaterial('dbg_ground_mat', scene);
     gm.emissiveColor = new BABYLON.Color3(0.4, 0.4, 0.4);
-    gm.disableLighting = true;
-    gm.wireframe = true;
-    g.material = gm;
-    g.position.y = 0.001;
-    g.isPickable = false;
-    out.push(g);
+    gm.disableLighting = true; gm.wireframe = true;
+    g.material = gm; g.position.y = 0.001; g.isPickable = false;
+    debugMeshes.push(g);
   }
-  console.log('Debug wireframes created:', out.length);
-  return out;
+
+  // observer: copia world position + rotation dai TN interni ai box ogni frame
+  const tmpPos = new BABYLON.Vector3();
+  const tmpRot = new BABYLON.Quaternion();
+  const tmpScale = new BABYLON.Vector3();
+  debugObserver = scene.onBeforeRenderObservable.add(() => {
+    for (let i = 0; i < debugSourceTNs.length; i++) {
+      const tn = debugSourceTNs[i];
+      const box = debugMeshes[i];
+      if (!tn || !box) continue;
+      tn.computeWorldMatrix(true);
+      tn.getWorldMatrix().decompose(tmpScale, tmpRot, tmpPos);
+      box.position.copyFrom(tmpPos);
+      box.rotationQuaternion.copyFrom(tmpRot);
+    }
+  });
+
+  console.log('Debug wireframes:', debugMeshes.length, '(di cui', debugSourceTNs.length, 'sincronizzati ai body)');
 }
 
 function applyImpulseAt(pt){
