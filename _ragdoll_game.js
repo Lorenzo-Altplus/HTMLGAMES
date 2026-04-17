@@ -68,33 +68,40 @@ async function start(){
     console.log('Bones:', skeleton.bones.map(b=>b.name));
 
     // --- RAGDOLL CONFIG (Mixamo) ---
+    // Meno segmenti = più stabile. Limiti ampi = no snap-back.
     const B = 'mixamorig:';
     const cfgFull = [
-      { bones: [B+'Head'],         size: 0.14, boxOffset: -0.08, min: -45, max: 45, mass: 1 },
-      { bones: [B+'Neck'],         size: 0.08, min: -30, max: 30, mass: 0.5 },
-      { bones: [B+'Spine2'],       size: 0.22, min: -10, max: 10, mass: 3.5 },
-      { bones: [B+'Spine1'],       size: 0.20, min: -15, max: 15, mass: 2.5 },
-      { bones: [B+'Spine', B+'Hips'], size: 0.22, min: -20, max: 20, mass: 4, putBoxInBoneCenter: true },
-      { bones: [B+'LeftArm'],      size: 0.07, min: -90, max: 90, mass: 1.2, rotationAxis: BABYLON.Axis.Z },
-      { bones: [B+'LeftForeArm'],  size: 0.06, min: 0,   max: 130, mass: 0.9, rotationAxis: BABYLON.Axis.Y },
-      { bones: [B+'LeftHand'],     size: 0.05, min: -30, max: 30,  mass: 0.3 },
-      { bones: [B+'RightArm'],     size: 0.07, min: -90, max: 90, mass: 1.2, rotationAxis: BABYLON.Axis.Z },
-      { bones: [B+'RightForeArm'], size: 0.06, min: 0,   max: 130, mass: 0.9, rotationAxis: BABYLON.Axis.Y },
-      { bones: [B+'RightHand'],    size: 0.05, min: -30, max: 30,  mass: 0.3 },
-      { bones: [B+'LeftUpLeg'],    size: 0.09, min: -70, max: 50,  mass: 2.2, rotationAxis: BABYLON.Axis.X },
-      { bones: [B+'LeftLeg'],      size: 0.07, min: 0,   max: 110, mass: 1.5, rotationAxis: BABYLON.Axis.X },
-      { bones: [B+'LeftFoot'],     size: 0.07, min: -30, max: 30,  mass: 0.5 },
-      { bones: [B+'RightUpLeg'],   size: 0.09, min: -70, max: 50,  mass: 2.2, rotationAxis: BABYLON.Axis.X },
-      { bones: [B+'RightLeg'],     size: 0.07, min: 0,   max: 110, mass: 1.5, rotationAxis: BABYLON.Axis.X },
-      { bones: [B+'RightFoot'],    size: 0.07, min: -30, max: 30,  mass: 0.5 },
+      // testa (include il collo per evitare un segmento piccolo)
+      { bones: [B+'Head', B+'Neck'], size: 0.18, boxOffset: -0.1, min: -60, max: 60, mass: 2 },
+      // torace (un solo box per Spine2+Spine1, evita catena di tre)
+      { bones: [B+'Spine2', B+'Spine1'], size: 0.30, boxOffset: -0.15, min: -20, max: 20, mass: 5 },
+      // bacino root
+      { bones: [B+'Spine', B+'Hips'], size: 0.28, boxOffset: -0.1, min: -30, max: 30, mass: 6, putBoxInBoneCenter: true },
+      // braccia (niente mani, niente avambraccio separato troppo piccolo)
+      { bones: [B+'LeftArm'],     size: 0.11, boxOffset: -0.15, min: -120, max: 120, rotationAxis: BABYLON.Axis.Z, mass: 2 },
+      { bones: [B+'LeftForeArm'], size: 0.09, boxOffset: -0.12, min: 0,    max: 140, rotationAxis: BABYLON.Axis.Y, mass: 1.2 },
+      { bones: [B+'RightArm'],    size: 0.11, boxOffset: -0.15, min: -120, max: 120, rotationAxis: BABYLON.Axis.Z, mass: 2 },
+      { bones: [B+'RightForeArm'],size: 0.09, boxOffset: -0.12, min: 0,    max: 140, rotationAxis: BABYLON.Axis.Y, mass: 1.2 },
+      // gambe
+      { bones: [B+'LeftUpLeg'],   size: 0.13, boxOffset: -0.22, min: -90,  max: 70,  rotationAxis: BABYLON.Axis.X, mass: 3 },
+      { bones: [B+'LeftLeg'],     size: 0.11, boxOffset: -0.20, min: 0,    max: 130, rotationAxis: BABYLON.Axis.X, mass: 2.2 },
+      { bones: [B+'RightUpLeg'],  size: 0.13, boxOffset: -0.22, min: -90,  max: 70,  rotationAxis: BABYLON.Axis.X, mass: 3 },
+      { bones: [B+'RightLeg'],    size: 0.11, boxOffset: -0.20, min: 0,    max: 130, rotationAxis: BABYLON.Axis.X, mass: 2.2 },
     ];
     const existing = new Set(skeleton.bones.map(b=>b.name));
     const cfg = cfgFull.filter(c => c.bones.every(bn => existing.has(bn)));
     const missing = cfgFull.filter(c => !c.bones.every(bn => existing.has(bn)));
     if (missing.length) console.warn('Bone config mancanti:', missing.map(m=>m.bones));
 
+    // Salva le matrici locali dei bone in T-pose (rest pose) prima che l'animazione parta.
+    // Servono per resettare la posa del personaggio prima di attivare il ragdoll,
+    // altrimenti la simulazione parte da frame di ballo con arti fuori dai limiti → contorto.
+    const restMatrices = skeleton.bones.map(b => b.getLocalMatrix().clone());
+
     // In Babylon 6 il costruttore chiama _init() da solo.
     ragdoll = new BABYLON.Ragdoll(skeleton, rootMesh, cfg);
+    // espongo le matrici rest sul ragdoll (serve a setMode)
+    ragdoll.__restMatrices = restMatrices;
 
     // animazione
     danceAG = scene.animationGroups[0] || null;
@@ -108,14 +115,7 @@ async function start(){
     else mode = Math.random() < 0.5 ? 'dance' : 'ragdoll';
     setMode(mode);
 
-    // click → afferra & lancia
-    scene.onPointerObservable.add((pi) => {
-      if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-      if (pi.event.button !== 0) return;
-      const pick = pi.pickInfo;
-      if (!pick || !pick.hit || pick.pickedMesh === ground) return;
-      if (currentMode !== 'ragdoll') setMode('ragdoll');
-      const pt = pick.pickedPoint;
+    function applyImpulseAt(pt){
       let closest = null, dist = Infinity;
       scene.meshes.forEach(mm => {
         if (mm === ground) return;
@@ -131,6 +131,26 @@ async function start(){
         closest.physicsBody.applyImpulse(impulse, pt);
       } else if (closest.physicsImpostor) {
         closest.physicsImpostor.applyImpulse(impulse, pt);
+      }
+    }
+
+    // click → afferra & lancia (se è in dance, prima passa a ragdoll, poi spinta)
+    scene.onPointerObservable.add((pi) => {
+      if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+      if (pi.event.button !== 0) return;
+      const pick = pi.pickInfo;
+      if (!pick || !pick.hit || pick.pickedMesh === ground) return;
+      const pt = pick.pickedPoint.clone();
+      const wasRagdoll = (currentMode === 'ragdoll' && ragdollActive);
+      if (!wasRagdoll) setMode('ragdoll');
+      // se stava ballando, il ragdoll si attiva sul prossimo frame → aspetta che sia attivo
+      if (wasRagdoll) {
+        applyImpulseAt(pt);
+      } else {
+        // aspetta due frame: uno per l'attivazione, uno perché i body prendano la rest pose
+        scene.onBeforeRenderObservable.addOnce(() => {
+          scene.onBeforeRenderObservable.addOnce(() => applyImpulseAt(pt));
+        });
       }
     });
 
@@ -149,7 +169,21 @@ function setMode(m){
   if (m === 'dance' && danceAG) danceAG.start(true);
   else if (m === 'ragdoll') {
     if (danceAG) danceAG.stop();
-    if (ragdoll && !ragdollActive) { ragdoll.ragdoll(); ragdollActive = true; }
+    if (ragdoll && !ragdollActive) {
+      // 1. riporta lo scheletro alla T-pose (rest) così il ragdoll parte da una posa "legale"
+      if (ragdoll.__restMatrices) {
+        for (let i = 0; i < skeleton.bones.length; i++) {
+          skeleton.bones[i].getLocalMatrix().copyFrom(ragdoll.__restMatrices[i]);
+          skeleton.bones[i].markAsDirty();
+        }
+        skeleton.computeAbsoluteMatrices(true);
+      }
+      // 2. aspetta un frame che il sync interno del ragdoll allinei le body alla rest pose, poi attiva
+      scene.onBeforeRenderObservable.addOnce(() => {
+        ragdoll.ragdoll();
+        ragdollActive = true;
+      });
+    }
   }
 }
 
