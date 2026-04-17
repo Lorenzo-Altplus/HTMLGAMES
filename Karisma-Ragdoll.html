@@ -2,19 +2,63 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<title>Karisma Ragdoll</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Karisma Loading</title>
 <link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
-  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#111;font-family:system-ui,sans-serif;color:#fff}
-  #c{width:100%;height:100%;display:block;touch-action:none;outline:none}
-  #hud{position:fixed;top:10px;left:10px;background:rgba(0,0,0,.55);padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.5;max-width:340px;backdrop-filter:blur(4px);z-index:5}
-  #hud b{color:#ffb84d}
-  #mode{color:#ffe066;font-weight:700}
-  button{background:#ff5a3c;color:#fff;border:0;padding:6px 12px;border-radius:6px;font-weight:600;cursor:pointer;margin-top:6px;margin-right:4px;font-size:12px}
-  button:hover{background:#ff7a5c}
-  #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;font-size:18px;background:rgba(0,0,0,.85);z-index:20}
-  #loading.hidden{display:none}
-  .err{color:#ff6060;margin-top:10px;font-size:13px;max-width:400px;text-align:center}
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #ffffff; font-family: system-ui, sans-serif; color: #222; }
+
+  /* --- Loading scene layers --- */
+  #bg {
+    position: fixed; inset: 0; z-index: 1;
+    background-image: url('karisma-assets/bg01.png');
+    background-repeat: repeat;
+    background-size: 480px auto;
+    opacity: 0.95;
+  }
+  #floor {
+    position: fixed; bottom: 0; left: 0; width: 100%; height: auto;
+    z-index: 2; pointer-events: none;
+    user-select: none;
+  }
+  #c {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    z-index: 3; background: transparent; outline: none; touch-action: none;
+  }
+  #now-loading {
+    position: fixed; top: 24px; right: 32px;
+    width: clamp(180px, 22vw, 320px);
+    z-index: 4; pointer-events: none; user-select: none;
+    animation: wiggle 2s ease-in-out infinite;
+  }
+  @keyframes wiggle {
+    0%, 100% { transform: rotate(-1deg); }
+    50%      { transform: rotate(2deg); }
+  }
+  #progress {
+    position: fixed; bottom: 24px; left: 24px;
+    width: clamp(260px, 32vw, 420px);
+    z-index: 4; user-select: none;
+  }
+
+  /* little floating ragdoll toggle */
+  #btn-ragdoll {
+    position: fixed; top: 24px; left: 24px; z-index: 6;
+    background: rgba(0,0,0,0.5); color: #fff; border: 0;
+    padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    font-family: 'Black Ops One', cursive; font-size: 14px; letter-spacing: 1px;
+    backdrop-filter: blur(4px);
+  }
+  #btn-ragdoll:hover { background: #ff5a3c; }
+
+  #loading-screen {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    background: #fff; font-family: 'Black Ops One', cursive; font-size: 24px; color: #888;
+  }
+  #loading-screen.hidden { display: none; }
+  .err { color: #e53935; font-size: 14px; text-align: center; max-width: 420px; margin-top: 14px; }
 
   /* Password gate */
   #pw-gate {
@@ -37,7 +81,6 @@
       font-family: 'Black Ops One', cursive; font-size: 18px; color: #fff;
       background: linear-gradient(135deg, #ff7043, #e64a19);
       border: none; border-radius: 12px; padding: 12px 40px; cursor: pointer;
-      margin-top: 0;
   }
 </style>
 </head>
@@ -45,34 +88,32 @@
 
 <!-- Password Gate -->
 <div id="pw-gate">
-    <h2>KARISMA RAGDOLL</h2>
+    <h2>KARISMA LOADING</h2>
     <input type="password" id="pw-input" placeholder="Password" autocomplete="off">
     <div class="pw-error" id="pw-error"></div>
     <button id="pw-submit">ENTER</button>
 </div>
 
-<div id="game-wrapper" style="display:none;width:100%;height:100%;">
+<!-- Scene (hidden until password) -->
+<div id="scene-wrapper" style="display:none;width:100%;height:100%;">
+  <div id="bg"></div>
+  <img id="floor" src="karisma-assets/floor.png" alt="">
   <canvas id="c"></canvas>
-  <div id="hud">
-    <div><b>Karisma</b> — modo: <span id="mode">...</span></div>
-    <div>• Trascina col mouse per orbitare</div>
-    <div>• Click sul personaggio → afferra e lancia</div>
-    <button id="btn-dance">Balla</button>
-    <button id="btn-ragdoll">Ragdoll!</button>
-    <button id="btn-random">Random</button>
-  </div>
-  <div id="loading">
-    <div>Caricamento...</div>
+  <img id="now-loading" src="karisma-assets/deco_txt_loading_02.png" alt="NOW LOADING">
+  <img id="progress" src="karisma-assets/loading_01.png" alt="progress">
+  <button id="btn-ragdoll" title="Toggle dance / stand">RAGDOLL</button>
+  <div id="loading-screen">
+    Loading…
     <div class="err" id="err"></div>
   </div>
 </div>
 
-<!-- Password gate logic -->
+<!-- Password gate logic (loads game on success) -->
 <script>
 (function() {
     const PASS = 'karisma2024';
     const gate = document.getElementById('pw-gate');
-    const wrapper = document.getElementById('game-wrapper');
+    const wrapper = document.getElementById('scene-wrapper');
     const inp = document.getElementById('pw-input');
     const err = document.getElementById('pw-error');
     const btn = document.getElementById('pw-submit');
@@ -83,19 +124,15 @@
         started = true;
         gate.classList.add('hidden');
         wrapper.style.display = '';
-        // load game scripts dynamically so we only download when authorised
         loadScripts();
     }
-
     function loadScripts() {
-        // Babylon 6.48.1 + Havok (Physics V2). La classe Ragdoll è stata aggiunta in v6
-        // e richiede PhysicsV2 → quindi Havok. Cannon non è più compatibile.
         const urls = [
             'https://cdn.jsdelivr.net/npm/babylonjs@6.48.1/babylon.js',
             'https://cdn.jsdelivr.net/npm/babylonjs-loaders@6.48.1/babylonjs.loaders.min.js',
             'https://cdn.jsdelivr.net/npm/@babylonjs/havok@1.3.0/lib/umd/HavokPhysics_umd.js',
-            '_karisma_b64.js?v=5',
-            '_ragdoll_game.js?v=5'
+            '_karisma_b64.js?v=6',
+            '_ragdoll_game.js?v=6'
         ];
         (function next(i){
             if (i >= urls.length) return;
@@ -109,11 +146,8 @@
         })(0);
     }
 
-    if (localStorage.getItem('at_auth') === '1') {
-        startGame();
-    } else {
-        inp.focus();
-    }
+    if (localStorage.getItem('at_auth') === '1') startGame();
+    else inp.focus();
 
     function tryLogin() {
         if (inp.value === PASS) {
@@ -125,11 +159,8 @@
             inp.focus();
         }
     }
-
     btn.addEventListener('click', tryLogin);
-    inp.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') tryLogin();
-    });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 })();
 </script>
 
