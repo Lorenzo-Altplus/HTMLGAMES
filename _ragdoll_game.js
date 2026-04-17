@@ -1,16 +1,54 @@
-// Karisma Loading — versione semplice (niente fisica).
-// KarismaBase.glb contiene le animazioni come action:
-//   - "Idle"     → loop di idle (o posa statica se ha un solo keyframe)
-//   - "Dance"    → loop di ballo
-//   - "Ragdoll"  → animazione di caduta (opzionale: se manca, il bottone RAGDOLL è no-op)
-// Stati: 'idle' (default) | 'dance' | 'ragdoll' (= plays Ragdoll anim, non physics)
+// Karisma Loading — animation-based (niente fisica).
+// Assets:
+//   KarismaBase.glb  → personaggio + Idle (posa) + Dance (loop)
+//   Ragdoll.glb      → animazione di caduta (one-shot)
+//   Stand.glb        → animazione di rialzo (one-shot, uso la traccia più lunga)
+// Flusso RAGDOLL: idle → ragdoll → lying 3s → stand → idle
 (function(){
 const canvas = document.getElementById('c');
 const engine = new BABYLON.Engine(canvas, true, { alpha: true, preserveDrawingBuffer: true, stencil: true });
-let scene, rootMesh, skeleton, idleAG, danceAG, ragdollAG;
+let scene, rootMesh, skeleton, idleAG, danceAG, ragdollAG, standAG;
 let state = null;
+let standTimer = null;
 
 const ASSET_DIR = 'karisma-assets/';
+
+// Carica un GLB "solo animazione": importa, prende il gruppo più lungo, lo CLONA
+// retargettandolo sullo scheletro del modello principale, poi distrugge tutto il resto.
+async function loadAndRetargetAnimation(filename, newName) {
+  const mainTargets = new Map();
+  skeleton.bones.forEach(b => {
+    const tn = b._linkedTransformNode;
+    if (tn && tn.name) mainTargets.set(tn.name, tn);
+  });
+
+  const agsBefore = new Set(scene.animationGroups);
+  const tnBefore  = new Set(scene.transformNodes);
+  const res = await BABYLON.SceneLoader.ImportMeshAsync('', ASSET_DIR, filename, scene);
+  const newAGs = scene.animationGroups.filter(ag => !agsBefore.has(ag));
+
+  // pick la traccia più lunga (nelle Stand.glb ce ne sono 2)
+  let srcAG = null, bestLen = 0;
+  newAGs.forEach(ag => { const len = ag.to - ag.from; if (len > bestLen) { bestLen = len; srcAG = ag; } });
+
+  let retargeted = null;
+  if (srcAG) {
+    retargeted = srcAG.clone(newName, t => mainTargets.get(t.name) || t);
+    retargeted.loopAnimation = false;
+    retargeted.stop();
+    console.log(`[AG] retargeted ${filename} → ${newName} (dur=${bestLen.toFixed(2)}s)`);
+  } else {
+    console.warn(`[AG] nessuna traccia trovata in ${filename}`);
+  }
+
+  // pulizia: tutto ciò che è stato importato va buttato
+  newAGs.forEach(ag => ag.dispose());
+  res.skeletons.forEach(s => s.dispose());
+  res.meshes.slice().reverse().forEach(m => m.dispose(false, false));
+  scene.transformNodes.filter(tn => !tnBefore.has(tn)).forEach(tn => tn.dispose());
+
+  return retargeted;
+}
 
 async function start(){
   try {
@@ -29,29 +67,26 @@ async function start(){
     const d = new BABYLON.DirectionalLight('d', new BABYLON.Vector3(-0.4,-1,-0.6), scene);
     d.intensity = 0.8;
 
-    // --- carica GLB ---
+    // --- carica GLB principale con idle e dance ---
     const agsBefore = new Set(scene.animationGroups);
     const res = await BABYLON.SceneLoader.ImportMeshAsync('', ASSET_DIR, 'KarismaBase.glb', scene);
-    rootMesh = res.meshes[0];
-    skeleton = res.skeletons[0];
+    rootMesh = res.meshes[0]; skeleton = res.skeletons[0];
     if (!skeleton) throw new Error('Skeleton non trovato in KarismaBase.glb.');
 
-    const newAGs = scene.animationGroups.filter(ag => !agsBefore.has(ag));
-    const byName = n => newAGs.find(ag => ag.name.toLowerCase() === n.toLowerCase());
-    idleAG    = byName('Idle');
-    danceAG   = byName('Dance');
-    ragdollAG = byName('Ragdoll') || byName('Fall') || byName('Falling');
-    newAGs.forEach(ag => { if (ag !== idleAG && ag !== danceAG && ag !== ragdollAG) ag.dispose(); });
+    const mainAGs = scene.animationGroups.filter(ag => !agsBefore.has(ag));
+    const byName = n => mainAGs.find(ag => ag.name.toLowerCase() === n.toLowerCase());
+    idleAG  = byName('Idle');
+    danceAG = byName('Dance');
+    mainAGs.forEach(ag => { if (ag !== idleAG && ag !== danceAG) ag.dispose(); });
 
-    console.log('[AG] idle =', idleAG?.name, `${(idleAG?.to - idleAG?.from)?.toFixed(2)}s`);
-    console.log('[AG] dance =', danceAG?.name, `${(danceAG?.to - danceAG?.from)?.toFixed(2)}s`);
-    console.log('[AG] ragdoll =', ragdollAG?.name, `${(ragdollAG?.to - ragdollAG?.from)?.toFixed(2)}s`);
+    if (idleAG)  { idleAG.loopAnimation = true;  idleAG.stop(); }
+    if (danceAG) { danceAG.loopAnimation = true; danceAG.stop(); }
 
-    if (idleAG)    { idleAG.loopAnimation = true;    idleAG.stop(); }
-    if (danceAG)   { danceAG.loopAnimation = true;   danceAG.stop(); }
-    if (ragdollAG) { ragdollAG.loopAnimation = false; ragdollAG.stop(); }
+    // --- retargeta Ragdoll e Stand ---
+    ragdollAG = await loadAndRetargetAnimation('Ragdoll.glb', 'ragdoll');
+    standAG   = await loadAndRetargetAnimation('Stand.glb',   'stand');
 
-    // --- posiziona e ruota il personaggio ---
+    // --- rotazione/scala/posizione sul __root__ ---
     rootMesh.computeWorldMatrix(true);
     const bb0 = rootMesh.getHierarchyBoundingVectors(true);
     const h0 = bb0.max.y - bb0.min.y;
@@ -66,27 +101,27 @@ async function start(){
 
     setState('idle');
 
-    // click sul personaggio → ragdoll (se c'è l'animazione)
+    // click sul personaggio = trigger ragdoll (se disponibile)
     scene.onPointerObservable.add((pi) => {
       if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
       if (pi.event.button !== 0) return;
       const pick = pi.pickInfo;
       if (!pick || !pick.hit) return;
-      if (state === 'dance') { flashBtn('btn-dance'); return; }
-      if (ragdollAG && state !== 'ragdoll') setState('ragdoll');
+      if (state === 'dance')   { flashBtn('btn-dance'); return; }
+      if (state === 'ragdoll' || state === 'standing') return; // già in corso
+      if (ragdollAG) setState('ragdoll');
     });
 
     document.getElementById('btn-dance').onclick = () => {
-      if (state === 'ragdoll') { location.reload(); return; }
+      if (state === 'ragdoll' || state === 'standing') return;
       setState(state === 'dance' ? 'idle' : 'dance');
     };
     document.getElementById('btn-ragdoll').onclick = () => {
-      if (state === 'ragdoll') { location.reload(); return; }
+      if (state === 'ragdoll' || state === 'standing') return;
       if (state === 'dance')   { setState('idle'); flashBtn('btn-ragdoll'); return; }
-      if (!ragdollAG)          { alert('Nessuna animazione "Ragdoll" trovata nel GLB.\nAggiungi un\'action chiamata "Ragdoll" (es. Mixamo "Falling Back Death").'); return; }
+      if (!ragdollAG) { alert('Ragdoll.glb non trovata / animazione non caricata.'); return; }
       setState('ragdoll');
     };
-    // il bottone DEBUG non ha più senso senza fisica: lo nascondo
     const debugBtn = document.getElementById('btn-debug');
     if (debugBtn) debugBtn.style.display = 'none';
 
@@ -100,9 +135,7 @@ async function start(){
 }
 
 function stopAllAnims() {
-  if (idleAG)    idleAG.stop();
-  if (danceAG)   danceAG.stop();
-  if (ragdollAG) ragdollAG.stop();
+  [idleAG, danceAG, ragdollAG, standAG].forEach(ag => { if (ag) ag.stop(); });
 }
 
 function flashBtn(id) {
@@ -117,6 +150,7 @@ function setState(s) {
   state = s;
   const dBtn = document.getElementById('btn-dance');
   const rBtn = document.getElementById('btn-ragdoll');
+  if (standTimer) { clearTimeout(standTimer); standTimer = null; }
 
   if (s === 'idle') {
     stopAllAnims();
@@ -127,6 +161,7 @@ function setState(s) {
     }
     dBtn.style.display = '';
     dBtn.textContent = 'DANCE'; dBtn.classList.remove('active');
+    rBtn.style.display = '';
     rBtn.textContent = 'RAGDOLL'; rBtn.classList.remove('active');
   }
   else if (s === 'dance') {
@@ -134,13 +169,38 @@ function setState(s) {
     if (danceAG) danceAG.start(true);
     dBtn.style.display = '';
     dBtn.textContent = 'IDLE'; dBtn.classList.add('active');
+    rBtn.style.display = '';
     rBtn.textContent = 'RAGDOLL'; rBtn.classList.remove('active');
   }
   else if (s === 'ragdoll') {
     stopAllAnims();
-    if (ragdollAG) ragdollAG.start(false);  // gioca una volta, resta sull'ultimo frame
+    if (ragdollAG) {
+      ragdollAG.start(false);
+      // quando l'animazione di caduta finisce, aspetta 3s a terra poi passa a stand
+      ragdollAG.onAnimationGroupEndObservable.addOnce(() => {
+        standTimer = setTimeout(() => {
+          if (state === 'ragdoll') setState('standing');
+        }, 3000);
+      });
+    }
     dBtn.style.display = 'none';
-    rBtn.textContent = 'RESTART'; rBtn.classList.add('active');
+    rBtn.style.display = '';
+    rBtn.textContent = '...'; rBtn.classList.add('active');
+  }
+  else if (s === 'standing') {
+    stopAllAnims();
+    if (standAG) {
+      standAG.start(false);
+      standAG.onAnimationGroupEndObservable.addOnce(() => {
+        if (state === 'standing') setState('idle');
+      });
+    } else {
+      // fallback se stand non c'è
+      setState('idle');
+    }
+    dBtn.style.display = 'none';
+    rBtn.style.display = '';
+    rBtn.textContent = '...'; rBtn.classList.add('active');
   }
 }
 
