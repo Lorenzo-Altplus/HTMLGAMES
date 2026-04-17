@@ -1,17 +1,14 @@
-// Karisma Loading — Babylon 6.48.1 + Havok. Loaded after password gate.
-// Primary model: KarismaBase.glb (has the idle animation, ~26s).
-// Dance animation comes from KarismaDance.glb and is retargeted to the main skeleton.
-// States: 'idle' (default) | 'dance' | 'ragdoll'.
+// Karisma Loading — Babylon 6.48.1 + Havok.
+// KarismaBase.glb contiene entrambe le animazioni: "Dance" (~26s) e "Idle" (~20s).
+// Ragdoll si può attivare SOLO da idle (da dance il tasto riporta prima a idle).
+// Bottone DEBUG mostra/nasconde le wireframe dei body physics.
 (function(){
 const canvas = document.getElementById('c');
 const engine = new BABYLON.Engine(canvas, true, { alpha: true, preserveDrawingBuffer: true, stencil: true });
-let scene, ragdoll, rootMesh, skeleton, idleAG, danceAG, ground;
+let scene, ragdoll, rootMesh, skeleton, kchar, idleAG, danceAG, ground;
 let state = null;
-// In un glTF le bone sono guidate dai TransformNode linkati; per riportare
-// il personaggio in T-pose dobbiamo ripristinare position/rotationQuaternion/scaling
-// di ciascun _linkedTransformNode (scrivere su bone.getLocalMatrix() viene sovrascritto).
-let restTransforms = null;   // [{ pos, rot, scale }]
-let rootRest = null;         // rest transform del mesh root (per replicare dopo ragdoll)
+let restTransforms = null;
+let physicsViewer = null;
 
 const ASSET_DIR = 'karisma-assets/';
 
@@ -22,63 +19,41 @@ async function loadMainModel() {
   skeleton = res.skeletons[0];
   if (!skeleton) throw new Error('Skeleton non trovato in KarismaBase.glb.');
 
-  // L'export di Blender genera 8 AG ma solo 1 è reale (durata ~26s). Tieni quello più lungo,
-  // scarta il resto così non inquinano scene.animationGroups.
-  const newAGs = scene.animationGroups.filter(ag => !agsBefore.has(ag));
-  let best = null, bestLen = 0;
-  newAGs.forEach(ag => {
-    const len = ag.to - ag.from;
-    if (len > bestLen) { bestLen = len; best = ag; }
-  });
-  newAGs.forEach(ag => { if (ag !== best) ag.dispose(); });
-  if (best) {
-    best.name = 'idle';
-    best.loopAnimation = true;
-    best.stop();
-  }
-  idleAG = best;
-  console.log('Idle anim:', idleAG ? idleAG.name : '(nessuna)', 'dur:', bestLen.toFixed(2));
-}
-
-async function loadDanceFromOtherGLB() {
-  // Mappa i TransformNode principali per nome bone: serviranno per retargettare.
-  const mainTargets = new Map();
-  skeleton.bones.forEach(b => {
-    const tn = b._linkedTransformNode || b.getTransformNode && b.getTransformNode();
-    if (tn && tn.name) mainTargets.set(tn.name, tn);
-  });
-
-  const agsBefore = new Set(scene.animationGroups);
-  const meshesBefore = new Set(scene.meshes);
-  const skelsBefore = new Set(scene.skeletons);
-  const tnBefore = new Set(scene.transformNodes);
-
-  const res = await BABYLON.SceneLoader.ImportMeshAsync('', ASSET_DIR, 'KarismaDance.glb', scene);
   const newAGs = scene.animationGroups.filter(ag => !agsBefore.has(ag));
 
-  // la più lunga è il ballo
-  let danceSrc = null, bestLen = 0;
-  newAGs.forEach(ag => {
-    const len = ag.to - ag.from;
-    if (len > bestLen) { bestLen = len; danceSrc = ag; }
-  });
-
-  if (danceSrc) {
-    danceAG = danceSrc.clone('dance', (target) => mainTargets.get(target.name) || target);
-    danceAG.loopAnimation = true;
-    danceAG.stop();
-    console.log('Dance anim retargetted, dur:', bestLen.toFixed(2));
-  } else {
-    console.warn('Ballo non trovato in KarismaDance.glb');
+  // trova Dance e Idle per nome; fallback: Idle = AG più lungo oltre a Dance
+  const byName = (n) => newAGs.find(ag => ag.name.toLowerCase() === n.toLowerCase());
+  danceAG = byName('Dance');
+  idleAG = byName('Idle');
+  if (!idleAG || (idleAG.to - idleAG.from) < 0.1) {
+    // Idle potrebbe avere durata 0 se il layer NLA non è stato pushato: usa il più lungo non-dance
+    let best = null, bestLen = 0;
+    newAGs.forEach(ag => {
+      if (ag === danceAG) return;
+      const len = ag.to - ag.from;
+      if (len > bestLen && len > 1) { bestLen = len; best = ag; }
+    });
+    idleAG = best;
+  }
+  if (!danceAG) {
+    let best = null, bestLen = 0;
+    newAGs.forEach(ag => {
+      if (ag === idleAG) return;
+      const len = ag.to - ag.from;
+      if (len > bestLen) { bestLen = len; best = ag; }
+    });
+    danceAG = best;
   }
 
-  // pulizia: dispose di mesh, skeleton, TransformNode e AG originali del second import
-  newAGs.forEach(ag => ag.dispose());
-  res.skeletons.forEach(s => s.dispose());
-  // dispose meshes in reverse (figli prima dei padri) per evitare warning
-  res.meshes.slice().reverse().forEach(m => m.dispose(false, false));
-  // TransformNodes aggiunti dal secondo import
-  scene.transformNodes.filter(tn => !tnBefore.has(tn)).forEach(tn => tn.dispose());
+  // dispose dei tracks extra (es. mixamo layer rimasto)
+  newAGs.forEach(ag => {
+    if (ag !== danceAG && ag !== idleAG) ag.dispose();
+  });
+  if (idleAG)  { idleAG.name = 'idle';   idleAG.loopAnimation = true;  idleAG.stop(); }
+  if (danceAG) { danceAG.name = 'dance'; danceAG.loopAnimation = true; danceAG.stop(); }
+
+  console.log('Loaded: idle =', idleAG ? `${(idleAG.to-idleAG.from).toFixed(1)}s` : 'n/a',
+              'dance =', danceAG ? `${(danceAG.to-danceAG.from).toFixed(1)}s` : 'n/a');
 }
 
 async function start(){
@@ -110,26 +85,21 @@ async function start(){
       { mass: 0, friction: 0.8, restitution: 0.1 }, scene);
 
     await loadMainModel();
-    await loadDanceFromOtherGLB();
 
-    // NON toccare il __root__ del glTF: il loader ci mette un rotationQuaternion per la
-    // conversione di handedness. Avvolgo invece tutto in un TransformNode wrapper e
-    // applico rotazione/scala/posizione a quello.
-    const kchar = new BABYLON.TransformNode('kchar', scene);
+    // wrapper per rotazione/scala/posizione senza toccare __root__ del glTF
+    kchar = new BABYLON.TransformNode('kchar', scene);
     rootMesh.parent = kchar;
-
     kchar.computeWorldMatrix(true);
     const bb0 = rootMesh.getHierarchyBoundingVectors(true);
     const h0 = bb0.max.y - bb0.min.y;
     if (h0 > 0) kchar.scaling.setAll(1.5 / h0);
-    kchar.rotation.y = Math.PI - 0.25;          // fronte camera + 3/4
-    kchar.position.x = 1.1;                      // a destra
+    kchar.rotation.y = Math.PI - 0.25;
+    kchar.position.x = 1.1;
     kchar.computeWorldMatrix(true);
     const bb1 = rootMesh.getHierarchyBoundingVectors(true);
-    kchar.position.y = -bb1.min.y;               // piedi a y=0
+    kchar.position.y = -bb1.min.y;
 
-    // rest pose (T-pose): salva TRS di ogni TransformNode collegato a una bone,
-    // PRIMA che parta qualsiasi animazione. È lo stato a cui torneremo prima del ragdoll.
+    // rest pose: snapshot dei TransformNode collegati alle bone
     restTransforms = skeleton.bones.map(b => {
       const tn = b._linkedTransformNode;
       if (!tn) return null;
@@ -141,7 +111,7 @@ async function start(){
       };
     });
 
-    // ragdoll config
+    // ragdoll config (invariato)
     const B = 'mixamorig:';
     const cfgFull = [
       { bones: [B+'Head', B+'Neck'],      size: 0.18, boxOffset: -0.1,  min: -60,  max: 60,  mass: 2 },
@@ -158,19 +128,22 @@ async function start(){
     ];
     const existing = new Set(skeleton.bones.map(b => b.name));
     const cfg = cfgFull.filter(c => c.bones.every(bn => existing.has(bn)));
-    // passo il wrapper: è il semantico root ora (contiene rotazione/scala/pos)
     ragdoll = new BABYLON.Ragdoll(skeleton, kchar, cfg);
 
-    // stato iniziale: idle
     setState('idle');
 
-    // click sul personaggio → ragdoll + impulso
+    // click sul personaggio → ragdoll + impulso, SOLO se siamo in idle
     scene.onPointerObservable.add((pi) => {
       if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
       if (pi.event.button !== 0) return;
       const pick = pi.pickInfo;
       if (!pick || !pick.hit || pick.pickedMesh === ground) return;
       const pt = pick.pickedPoint.clone();
+      if (state === 'dance') {
+        // blocca: ragdoll solo da idle
+        flashBtn('btn-dance');
+        return;
+      }
       const wasRagdoll = (state === 'ragdoll');
       if (!wasRagdoll) setState('ragdoll');
       if (wasRagdoll) applyImpulseAt(pt);
@@ -185,9 +158,16 @@ async function start(){
       setState(state === 'dance' ? 'idle' : 'dance');
     };
     document.getElementById('btn-ragdoll').onclick = () => {
-      if (state === 'ragdoll') location.reload();
-      else setState('ragdoll');
+      if (state === 'ragdoll') { location.reload(); return; }
+      if (state === 'dance') {
+        // ragdoll consentito solo da idle → torna a idle prima
+        setState('idle');
+        flashBtn('btn-ragdoll');
+        return;
+      }
+      setState('ragdoll');
     };
+    document.getElementById('btn-debug').onclick = toggleDebug;
 
     document.getElementById('loading-screen').classList.add('hidden');
     engine.runRenderLoop(() => scene.render());
@@ -198,8 +178,14 @@ async function start(){
   }
 }
 
+function flashBtn(id) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  b.style.background = '#ffb84d';
+  setTimeout(() => { b.style.background = ''; }, 280);
+}
+
 function stopAllAnims() {
-  // stop() su TUTTI i gruppi, anche quelli che potrebbero essere stati lasciati vivi
   scene.animationGroups.forEach(ag => ag.stop());
 }
 
@@ -214,7 +200,6 @@ function snapToRestPose() {
     }
     r.tn.scaling.copyFrom(r.scale);
   }
-  // forza una compute delle matrici assolute del skeleton nel frame corrente
   skeleton.prepare();
 }
 
@@ -225,29 +210,51 @@ function setState(s) {
   const rBtn = document.getElementById('btn-ragdoll');
 
   if (s === 'idle') {
-    stopAllAnims();
-    if (idleAG) idleAG.start(true);
+    stopAllAnims(); if (idleAG) idleAG.start(true);
     dBtn.textContent = 'DANCE'; dBtn.classList.remove('active');
     rBtn.textContent = 'RAGDOLL'; rBtn.classList.remove('active');
   }
   else if (s === 'dance') {
-    stopAllAnims();
-    if (danceAG) danceAG.start(true);
-    else if (idleAG) idleAG.start(true); // fallback se dance mancante
-    dBtn.textContent = 'IDLE';  dBtn.classList.add('active');
+    stopAllAnims(); if (danceAG) danceAG.start(true); else if (idleAG) idleAG.start(true);
+    dBtn.textContent = 'IDLE'; dBtn.classList.add('active');
     rBtn.textContent = 'RAGDOLL'; rBtn.classList.remove('active');
   }
   else if (s === 'ragdoll') {
-    stopAllAnims();
-    snapToRestPose();
-    scene.onBeforeRenderObservable.addOnce(() => ragdoll.ragdoll());
+    stopAllAnims(); snapToRestPose();
+    scene.onBeforeRenderObservable.addOnce(() => {
+      ragdoll.ragdoll();
+      // se il debug era attivo, aggiorna anche la viewer (i body ora sono dinamici)
+      if (physicsViewer) refreshPhysicsViewer();
+    });
     dBtn.textContent = 'RESTART';
     rBtn.textContent = 'RESTART'; rBtn.classList.add('active');
   }
 }
 
+function toggleDebug() {
+  const btn = document.getElementById('btn-debug');
+  if (physicsViewer) {
+    physicsViewer.dispose();
+    physicsViewer = null;
+    btn.classList.remove('active');
+  } else {
+    physicsViewer = new BABYLON.PhysicsViewer(scene);
+    refreshPhysicsViewer();
+    btn.classList.add('active');
+  }
+}
+
+function refreshPhysicsViewer() {
+  if (!physicsViewer) return;
+  scene.meshes.forEach(m => {
+    if (m === ground) return;
+    if (m.physicsBody)    physicsViewer.showBody(m.physicsBody);
+    if (m.physicsImpostor) physicsViewer.showImpostor(m.physicsImpostor);
+  });
+}
+
 function applyImpulseAt(pt){
-  let closest = null, dist = Infinity;
+  let closest=null, dist=Infinity;
   scene.meshes.forEach(mm => {
     if (mm === ground) return;
     if (!mm.physicsBody && !mm.physicsImpostor) return;
